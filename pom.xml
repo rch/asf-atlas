@@ -2369,6 +2369,25 @@
         </profile>
 
         <profile>
+            <id>graph-provider-age</id>
+            <activation>
+                <property>
+                    <name>GRAPH-PROVIDER</name>
+                    <value>age</value>
+                </property>
+            </activation>
+            <properties>
+                <distro.exclude.packages>WEB-INF/lib/je-*.jar,WEB-INF/lib/solr-test-framework-*.jar, WEB-INF/lib/jts-*.jar,WEB-INF/lib/dom4j-*.jar,WEB-INF/lib/ant-*.jar</distro.exclude.packages>
+                <graph.index.backend>age</graph.index.backend>
+                <graphArtifact>atlas-graphdb-age</graphArtifact>
+                <graphGroup>org.apache.atlas</graphGroup>
+                <graphdb.backend.impl>org.apache.atlas.repository.graphdb.age.AtlasAgeGraphDatabase</graphdb.backend.impl>
+                <skipDocs>false</skipDocs>
+                <tests.solr.embedded>false</tests.solr.embedded>
+            </properties>
+        </profile>
+
+        <profile>
             <id>skipMinify</id>
             <properties>
                 <project.build.dashboardv2.gruntBuild>build</project.build.dashboardv2.gruntBuild>

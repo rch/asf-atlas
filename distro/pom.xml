@@ -220,6 +220,27 @@ atlas.graph.storage.hbase.regions-per-server=1
 
     <profiles>
         <profile>
+            <id>graph-provider-age</id>
+            <activation>
+                <property>
+                    <name>GRAPH-PROVIDER</name>
+                    <value>age</value>
+                </property>
+            </activation>
+            <properties>
+                <cassandra.embedded>false</cassandra.embedded>
+                <elasticsearch.managed>false</elasticsearch.managed>
+                <entity.repository.properties>atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository</entity.repository.properties>
+                <graph.index.backend>age</graph.index.backend>
+                <graph.index.properties>#AGE uses PostgreSQL full-text indexing</graph.index.properties>
+                <graph.storage.backend>age</graph.storage.backend>
+                <graph.storage.properties>#AGE graph storage via PostgreSQL + Apache AGE</graph.storage.properties>
+                <hbase.embedded>false</hbase.embedded>
+                <solr.embedded>false</solr.embedded>
+            </properties>
+        </profile>
+
+        <profile>
             <id>Windows</id>
             <activation>
                 <os>

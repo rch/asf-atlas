@@ -33,6 +33,7 @@
 
     <!-- Build all modules including all the possible graph providers although only one will be used -->
     <modules>
+        <module>age</module>
         <module>api</module>
         <module>common</module>
         <module>graphdb-impls</module>
