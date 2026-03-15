@@ -143,7 +143,7 @@ public class EmbeddedServer {
             try {
                 auditService.add(AtlasAuditEntry.AuditOperation.SERVER_START, SERVER_START_TIME, date, null, null, 0);
                 auditService.add(AtlasAuditEntry.AuditOperation.SERVER_STATE_ACTIVE, date, date, null, null, 0);
-            } catch (AtlasBaseException e) {
+            } catch (Exception e) {
                 LOG.error("Exception occurred during audit", e);
             } finally {
                 // After server related audits are added, the request created and now cleared here.
