@@ -208,7 +208,23 @@ public class AtlasStructDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasStructDe
         String                  typePropertyKey        = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret);
         String                  encodedTypePropertyKey = AtlasGraphUtilsV2.encodePropertyKey(typePropertyKey);
         Object                  names                  = vertex.getProperty(encodedTypePropertyKey, Object.class);
-        List<String>            attrNames              = names instanceof List ? (List<String>) names : new ArrayList<>();
+        List<String>            attrNames              = names instanceof List ? new ArrayList<>((List<String>) names) : new ArrayList<>();
+
+        // HARDEN: the names-list property (__type.<Type>) can be left incomplete by typedef
+        // patches/updates (observed dropping the unique 'qualifiedName' on re-read). The
+        // per-attribute def properties (__type.<Type>.<attr>) are the reliable source of
+        // truth, so union the attribute names discovered from them — no stored attribute is
+        // silently dropped on read. [aegir/signals AGE-backend fork; upstream-candidate]
+        String attrPrefix = typePropertyKey + ".";
+        for (String encodedKey : vertex.getPropertyKeys()) {
+            String decodedKey = AtlasGraphUtilsV2.decodePropertyKey(encodedKey);
+            if (decodedKey != null && decodedKey.startsWith(attrPrefix)) {
+                String attrName = decodedKey.substring(attrPrefix.length());
+                if (!attrName.isEmpty() && !attrName.contains(".") && !attrNames.contains(attrName)) {
+                    attrNames.add(attrName);
+                }
+            }
+        }
 
         if (CollectionUtils.isNotEmpty(attrNames)) {
             for (String attrName : attrNames) {
