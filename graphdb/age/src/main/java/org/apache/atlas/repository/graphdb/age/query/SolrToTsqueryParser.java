@@ -31,7 +31,11 @@ import java.util.regex.Pattern;
  *   *:*
  */
 public class SolrToTsqueryParser {
-    private static final Pattern FIELD_PATTERN = Pattern.compile("v\\.\"([^\"]+)\":([^\\s]+)");
+    // Matches a structured field filter with either element-identifier prefix (Janus
+    // "v." or AGE "$v$"), an optionally parenthesized / quoted value:
+    //   v."__typeName":hive_table   |   $v$"__typeName":(hive_table)
+    private static final Pattern FIELD_PATTERN =
+            Pattern.compile("(?:v\\.|\\$v\\$)\"([^\"]+)\"\\s*:\\s*\\(?\"?([^)\"\\s]+)\"?\\)?");
     private static final Pattern WILDCARD_PATTERN = Pattern.compile("\\*:\\*");
 
     public static ParsedQuery parse(String queryString) {
@@ -39,44 +43,36 @@ public class SolrToTsqueryParser {
             return new ParsedQuery(null, new ArrayList<>());
         }
 
-        // Strip the element identifier prefix (e.g., "v." in "v.\"__typeName\":value")
-        String normalized = queryString.trim();
-        // Remove leading identifier like "v." or "e."
-        if (normalized.startsWith("v.") || normalized.startsWith("e.")) {
-            // Already handled by regex
-        }
-
         List<FieldFilter> filters = new ArrayList<>();
         List<String> freeTextTerms = new ArrayList<>();
 
-        // Split on AND
-        String[] parts = normalized.split("\\s+AND\\s+");
-
-        for (String part : parts) {
-            part = part.trim();
-            Matcher matcher = FIELD_PATTERN.matcher(part);
-
-            if (matcher.matches()) {
-                String field = matcher.group(1);
-                String value = matcher.group(2);
-
-                // __fullText is a special field — route to tsvector search
-                if ("__fullText".equals(field)) {
-                    freeTextTerms.add(sanitizeTsqueryTerm(value));
-                } else {
-                    filters.add(new FieldFilter(field, unquote(value)));
-                }
+        // Extract structured field filters anywhere in the query — regardless of the
+        // element-identifier prefix, parenthesized values, outer parens, or AND/OR
+        // joiners. find() (not matches()) so a wrapped query like
+        //   ($v$"__typeName":(hive_table))
+        // still yields field=__typeName value=hive_table.
+        Matcher matcher = FIELD_PATTERN.matcher(queryString);
+        while (matcher.find()) {
+            String field = matcher.group(1);
+            String value = matcher.group(2);
+            if ("__fullText".equals(field)) {
+                freeTextTerms.add(sanitizeTsqueryTerm(value));
             } else {
-                // Treat as free-text search term
-                String term = part.replaceAll("[\"()]", "").trim();
-                if (!term.isEmpty() && !"*:*".equals(term)) {
-                    freeTextTerms.add(sanitizeTsqueryTerm(term));
-                }
+                filters.add(new FieldFilter(field, unquote(value)));
+            }
+        }
+
+        // No structured filters -> treat the residual text as free-text terms.
+        if (filters.isEmpty() && freeTextTerms.isEmpty()) {
+            String stripped = queryString.replaceAll("\\$v\\$|v\\.|e\\.", " ").replaceAll("[\"()]", " ");
+            for (String t : stripped.split("\\s+")) {
+                if (t.isEmpty() || "AND".equals(t) || "OR".equals(t) || "*:*".equals(t)) continue;
+                String s = sanitizeTsqueryTerm(t);
+                if (!s.isEmpty()) freeTextTerms.add(s);
             }
         }
 
         String tsquery = freeTextTerms.isEmpty() ? null : String.join(" & ", freeTextTerms);
-
         return new ParsedQuery(tsquery, filters);
     }
 

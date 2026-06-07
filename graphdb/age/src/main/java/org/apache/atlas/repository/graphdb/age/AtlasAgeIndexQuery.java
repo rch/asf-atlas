@@ -104,8 +104,9 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
                     long vertexId = rs.getLong(1);
                     double score = rs.getDouble(2);
 
-                    AgeVertex ageVertex = new AgeVertex(vertexId);
-                    AtlasAgeVertex atlasVertex = new AtlasAgeVertex(graph, ageVertex);
+                    // load shadow props (else __typeName/__state are null and Atlas's
+                    // post-filter drops every result -> empty search). [AGE-backend fork]
+                    AtlasAgeVertex atlasVertex = (AtlasAgeVertex) graph.materializeVertex(vertexId);
 
                     results.add(new AgeIndexResult<>(atlasVertex, null, score));
                 }

@@ -706,11 +706,13 @@ public final class GraphHelper {
     }
 
     public static long getCreatedTime(AtlasElement element) {
-        return element.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class);
+        Long ts = element.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class);
+        return ts != null ? ts : 0L;  // harden: edge/element may lack a timestamp (AGE backend) -> no NPE
     }
 
     public static long getModifiedTime(AtlasElement element) {
-        return element.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class);
+        Long ts = element.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class);
+        return ts != null ? ts : 0L;  // harden: edge/element may lack a timestamp (AGE backend) -> no NPE
     }
 
     public static boolean isActive(AtlasEntity entity) {
