@@ -105,7 +105,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
             try (ResultSet rs = cypherExecutor.executeCypher(cypher)) {
                 if (rs.next()) {
                     long edgeId = AgeCypherExecutor.extractAgtypeId(rs.getString(1));
-                    return new AtlasAgeEdge(this, new AgeEdge(edgeId, fromId, toId, relationshipLabel));
+                    return materializeEdge(edgeId, fromId, toId, relationshipLabel);  // load shadow props
                 }
             }
 
@@ -206,7 +206,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
                     String label = rs.getString(4);
                     if (label != null) label = label.replace("\"", "").trim();
 
-                    result.add(new AtlasAgeEdge(this, new AgeEdge(eid, aid, bid, label)));
+                    result.add(materializeEdge(eid, aid, bid, label));  // load shadow props
                 }
             }
 
@@ -284,6 +284,21 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
             return new AtlasAgeVertex(this, ageVertex);
         } catch (SQLException e) {
             throw new RuntimeException("Failed to materialize vertex " + id, e);
+        }
+    }
+
+    /**
+     * Build an AtlasAgeEdge for a known edge id WITH its properties loaded from the shadow
+     * table — the edge twin of materializeVertex. Traversal/query paths MUST use this, else
+     * the edge's __typeName/__state come back null and relationship mapping NPEs
+     * (mapEdgeToAtlasRelationship -> getType(null)). [aegir/signals AGE-backend fork; upstreamable]
+     */
+    public AtlasEdge<AtlasAgeVertex, AtlasAgeEdge> materializeEdge(long eid, long outVertexId, long inVertexId, String label) {
+        try {
+            Map<String, Object> props = loadEdgePropertiesFromShadow(eid);
+            return new AtlasAgeEdge(this, new AgeEdge(eid, outVertexId, inVertexId, label, props));
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to materialize edge " + eid, e);
         }
     }
 

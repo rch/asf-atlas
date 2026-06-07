@@ -128,7 +128,7 @@ public class AtlasAgeGraphQuery implements AtlasGraphQuery<AtlasAgeVertex, Atlas
                     String label = rs.getString(4);
                     if (label != null) label = label.replace("\"", "").trim();
 
-                    result.add(new AtlasAgeEdge(graph, new AgeEdge(eid, aid, bid, label)));
+                    result.add(graph.materializeEdge(eid, aid, bid, label));  // load shadow props
                 }
             }
 
