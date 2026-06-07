@@ -113,6 +113,8 @@ public class AtlasAgeUniqueKeyHandler extends AtlasUniqueKeyHandler {
     }
 
     private String escape(String value) {
-        return value.replace("'", "''");
+        // Harden: callers may pass a null typeName/keyName (e.g. an attribute with no
+        // declared type on the update path) — must not NPE. [aegir/signals AGE-backend fork]
+        return value == null ? "" : value.replace("'", "''");
     }
 }

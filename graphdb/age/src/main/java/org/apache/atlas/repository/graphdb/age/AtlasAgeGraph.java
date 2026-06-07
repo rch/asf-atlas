@@ -267,6 +267,26 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
         }
     }
 
+    /**
+     * Build an AtlasAgeVertex for a known vertex id WITH its properties loaded from the
+     * shadow table. Query paths (graph/vertex queries) MUST use this: a bare
+     * AgeVertex(id) carries no properties, so __typeName/__state come back null and
+     * entity retrieval, search resolution, and relationship-attribute mapping all NPE
+     * ("No typename found" / getType(null)). [aegir/signals AGE-backend fork; upstreamable]
+     */
+    public AtlasVertex<AtlasAgeVertex, AtlasAgeEdge> materializeVertex(long id) {
+        try {
+            AgeVertex ageVertex = new AgeVertex(id);
+            Map<String, Object> props = loadVertexPropertiesFromShadow(id);
+            if (props != null) {
+                ageVertex.setProperties(props);
+            }
+            return new AtlasAgeVertex(this, ageVertex);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to materialize vertex " + id, e);
+        }
+    }
+
     @Override
     public Set<String> getEdgeIndexKeys() {
         return Collections.emptySet();

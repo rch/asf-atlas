@@ -162,7 +162,7 @@ public class AtlasAgeGraphQuery implements AtlasGraphQuery<AtlasAgeVertex, Atlas
             try (ResultSet rs = graph.getCypherExecutor().executeCypher(cypher)) {
                 while (rs.next()) {
                     long vid = AgeCypherExecutor.extractAgtypeId(rs.getString(1));
-                    result.add(new AtlasAgeVertex(graph, new AgeVertex(vid)));
+                    result.add(graph.materializeVertex(vid));  // load shadow props (else __typeName null)
                 }
             }
 
