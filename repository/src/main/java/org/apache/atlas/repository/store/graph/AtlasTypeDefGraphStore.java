@@ -879,6 +879,16 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
     }
 
     private void rectifyTypeErrorsIfAny(AtlasTypesDef typesDef) {
+        // Harden against an inconsistent/partial type store: a null element in any def
+        // list — e.g. an orphaned or half-written type vertex that deserialized to null
+        // (observed on the Apache AGE backend after an interrupted bootstrap) — must not
+        // crash startup with an NPE. Drop nulls so rectification proceeds over the valid
+        // defs and Atlas can still come up. [aegir/signals AGE-backend fork; upstreamable]
+        if (typesDef.getEnumDefs()           != null) { typesDef.getEnumDefs().removeIf(d -> d == null); }
+        if (typesDef.getStructDefs()         != null) { typesDef.getStructDefs().removeIf(d -> d == null); }
+        if (typesDef.getClassificationDefs() != null) { typesDef.getClassificationDefs().removeIf(d -> d == null); }
+        if (typesDef.getEntityDefs()         != null) { typesDef.getEntityDefs().removeIf(d -> d == null); }
+
         final Set<String> entityNames = new HashSet<>();
 
         if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
