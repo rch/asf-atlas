@@ -41,6 +41,12 @@ public class AgeConnectionPool implements AutoCloseable {
         config.setIdleTimeout(600000);
         config.setMaxLifetime(1800000);
         config.setAutoCommit(false);
+        // Default every pooled connection's search_path to include ag_catalog — AGE's
+        // schema, where the graph AND the FTI/index shadow tables (atlas_fti_vertex, …)
+        // live. Code paths that don't SET search_path themselves (e.g. AtlasAgeIndexQuery's
+        // full-text search) otherwise fail unqualified lookups with "relation does not
+        // exist" under the default "$user", public. [aegir/signals AGE-backend fork; upstreamable]
+        config.setConnectionInitSql("SET search_path = ag_catalog, \"$user\", public");
 
         this.dataSource = new HikariDataSource(config);
 
