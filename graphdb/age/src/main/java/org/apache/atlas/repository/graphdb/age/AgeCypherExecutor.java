@@ -309,14 +309,40 @@ public class AgeCypherExecutor {
             char ch = content.charAt(i);
 
             if (ch == '"') {
-                // String value
+                // String value — decode JSON/agtype escapes. The prior version dropped the
+                // backslash and kept the next char literally, so `\n`→'n', `\t`→'t' etc. (the
+                // round-trip dual of the shadow-sync escape bug): multi-line values like
+                // AtlasGlossaryTerm.longDescription came back with newlines flattened to 'n'.
                 StringBuilder sb = new StringBuilder();
                 i++;
                 while (i < len && content.charAt(i) != '"') {
-                    if (content.charAt(i) == '\\' && i + 1 < len) {
-                        i++;
+                    char c = content.charAt(i);
+                    if (c == '\\' && i + 1 < len) {
+                        char esc = content.charAt(i + 1);
+                        i += 2;
+                        switch (esc) {
+                            case 'n': sb.append('\n'); break;
+                            case 't': sb.append('\t'); break;
+                            case 'r': sb.append('\r'); break;
+                            case 'b': sb.append('\b'); break;
+                            case 'f': sb.append('\f'); break;
+                            case 'u':
+                                if (i + 4 <= len) {
+                                    try {
+                                        sb.append((char) Integer.parseInt(content.substring(i, i + 4), 16));
+                                        i += 4;
+                                    } catch (NumberFormatException ex) {
+                                        sb.append('u');
+                                    }
+                                } else {
+                                    sb.append('u');
+                                }
+                                break;
+                            default: sb.append(esc); // \" \\ \/ and any other → literal next char
+                        }
+                        continue;
                     }
-                    sb.append(content.charAt(i));
+                    sb.append(c);
                     i++;
                 }
                 i++; // skip closing quote
@@ -433,9 +459,36 @@ public class AgeCypherExecutor {
         return sb.toString();
     }
 
+    /**
+     * Escape a string for embedding as a JSON value inside a single-quoted SQL ::jsonb literal.
+     * Two escaping layers at once: JSON-string escaping (backslash, double-quote, and the C0 control
+     * characters, which Postgres' json/jsonb input rejects unescaped — "Character with value 0x0a
+     * must be escaped") AND SQL single-quote doubling (the whole jsonb literal is wrapped in '...').
+     * The prior version escaped only \ " ' and left raw newlines/tabs in multi-line property values
+     * (e.g. AtlasGlossaryTerm.longDescription) — that aborted the shadow-sync transaction, poisoning
+     * the whole term/entity update. [aegir/signals AGE-backend fork; upstreamable]
+     */
     private static String escapeJsonString(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("'", "''");
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '"':  sb.append("\\\""); break;
+                case '\'': sb.append("''");   break; // SQL literal: double the single quote
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                case '\t': sb.append("\\t");  break;
+                case '\b': sb.append("\\b");  break;
+                case '\f': sb.append("\\f");  break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
 }
