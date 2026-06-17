@@ -398,8 +398,8 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
     @Override
     public void clear() {
         try {
-            cypherExecutor.executeSqlUpdate("DELETE FROM atlas_fti_vertex");
-            cypherExecutor.executeSqlUpdate("DELETE FROM atlas_fti_edge");
+            cypherExecutor.executeSqlUpdate("DELETE FROM ag_catalog.atlas_fti_vertex");
+            cypherExecutor.executeSqlUpdate("DELETE FROM ag_catalog.atlas_fti_edge");
             cypherExecutor.executeSqlUpdate("DELETE FROM atlas_composite_index");
             cypherExecutor.executeSqlUpdate("DELETE FROM atlas_unique_key");
             cypherExecutor.executeSqlUpdate("DELETE FROM atlas_unique_type_key");
@@ -634,7 +634,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
     }
 
     private Map<String, Object> loadVertexPropertiesFromShadow(long vertexId) throws SQLException {
-        String sql = "SELECT properties FROM atlas_fti_vertex WHERE vertex_id = " + vertexId;
+        String sql = "SELECT properties FROM ag_catalog.atlas_fti_vertex WHERE vertex_id = " + vertexId;
 
         try (ResultSet rs = cypherExecutor.executeSql(sql)) {
             if (rs.next()) {
@@ -649,7 +649,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
     }
 
     private Map<String, Object> loadEdgePropertiesFromShadow(long edgeId) throws SQLException {
-        String sql = "SELECT properties FROM atlas_fti_edge WHERE edge_id = " + edgeId;
+        String sql = "SELECT properties FROM ag_catalog.atlas_fti_edge WHERE edge_id = " + edgeId;
 
         try (ResultSet rs = cypherExecutor.executeSql(sql)) {
             if (rs.next()) {
@@ -679,7 +679,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
             if (i > 0) ids.append(",");
             ids.append(vertexIds.get(i));
         }
-        String sql = "SELECT vertex_id, properties FROM atlas_fti_vertex WHERE vertex_id = ANY(ARRAY[" + ids + "]::bigint[])";
+        String sql = "SELECT vertex_id, properties FROM ag_catalog.atlas_fti_vertex WHERE vertex_id = ANY(ARRAY[" + ids + "]::bigint[])";
         try (ResultSet rs = cypherExecutor.executeSql(sql)) {
             while (rs.next()) {
                 String jsonb = rs.getString(2);
@@ -702,7 +702,7 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
             if (i > 0) ids.append(",");
             ids.append(edgeIds.get(i));
         }
-        String sql = "SELECT edge_id, properties FROM atlas_fti_edge WHERE edge_id = ANY(ARRAY[" + ids + "]::bigint[])";
+        String sql = "SELECT edge_id, properties FROM ag_catalog.atlas_fti_edge WHERE edge_id = ANY(ARRAY[" + ids + "]::bigint[])";
         try (ResultSet rs = cypherExecutor.executeSql(sql)) {
             while (rs.next()) {
                 String jsonb = rs.getString(2);

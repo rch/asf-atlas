@@ -72,7 +72,7 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
                 sql.append("1.0 AS score ");
             }
 
-            sql.append("FROM atlas_fti_vertex WHERE 1=1");
+            sql.append("FROM ag_catalog.atlas_fti_vertex WHERE 1=1");
 
             if (parsed.hasTsquery()) {
                 sql.append(" AND search_text @@ to_tsquery('english', '")
@@ -130,7 +130,7 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
         try {
             SolrToTsqueryParser.ParsedQuery parsed = SolrToTsqueryParser.parse(queryString);
 
-            StringBuilder sql = new StringBuilder("SELECT count(*) FROM atlas_fti_vertex WHERE 1=1");
+            StringBuilder sql = new StringBuilder("SELECT count(*) FROM ag_catalog.atlas_fti_vertex WHERE 1=1");
 
             if (parsed.hasTsquery()) {
                 sql.append(" AND search_text @@ to_tsquery('english', '")
@@ -170,7 +170,7 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
             List<Result<AtlasAgeVertex, AtlasAgeEdge>> results = new ArrayList<>();
             SolrToTsqueryParser.ParsedQuery parsed = SolrToTsqueryParser.parse(queryString);
 
-            StringBuilder sql = new StringBuilder("SELECT edge_id, 1.0 AS score FROM atlas_fti_edge WHERE 1=1");
+            StringBuilder sql = new StringBuilder("SELECT edge_id, 1.0 AS score FROM ag_catalog.atlas_fti_edge WHERE 1=1");
 
             for (SolrToTsqueryParser.FieldFilter filter : parsed.getFieldFilters()) {
                 sql.append(" AND properties->>'").append(filter.getField())
@@ -202,7 +202,7 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
     @Override
     public Long edgeTotals() {
         try {
-            String sql = "SELECT count(*) FROM atlas_fti_edge";
+            String sql = "SELECT count(*) FROM ag_catalog.atlas_fti_edge";
             try (ResultSet rs = graph.getCypherExecutor().executeSql(sql)) {
                 if (rs.next()) return rs.getLong(1);
             }

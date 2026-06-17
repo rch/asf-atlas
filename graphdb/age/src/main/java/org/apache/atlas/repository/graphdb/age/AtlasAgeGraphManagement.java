@@ -232,7 +232,7 @@ public class AtlasAgeGraphManagement implements AtlasGraphManagement {
             return;
         }
         try {
-            String        table = isVertex ? "atlas_fti_vertex" : "atlas_fti_edge";
+            String        table = isVertex ? "ag_catalog.atlas_fti_vertex" : "ag_catalog.atlas_fti_edge";
             String        pgName = pgIndexName(indexName);
             StringBuilder cols   = new StringBuilder();
             for (AtlasPropertyKey key : keys) {
