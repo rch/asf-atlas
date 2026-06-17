@@ -63,7 +63,7 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
             SolrToTsqueryParser.ParsedQuery parsed = SolrToTsqueryParser.parse(queryString);
 
             StringBuilder sql = new StringBuilder();
-            sql.append("SELECT vertex_id, ");
+            sql.append("SELECT vertex_id, properties, ");  // select props inline → no per-result query
 
             if (parsed.hasTsquery()) {
                 sql.append("ts_rank_cd(search_text, to_tsquery('english', '")
@@ -102,11 +102,18 @@ public class AtlasAgeIndexQuery implements AtlasIndexQuery<AtlasAgeVertex, Atlas
             try (ResultSet rs = graph.getCypherExecutor().executeSql(sql.toString())) {
                 while (rs.next()) {
                     long vertexId = rs.getLong(1);
-                    double score = rs.getDouble(2);
+                    String propsJson = rs.getString(2);
+                    double score = rs.getDouble(3);
 
-                    // load shadow props (else __typeName/__state are null and Atlas's
-                    // post-filter drops every result -> empty search). [AGE-backend fork]
-                    AtlasAgeVertex atlasVertex = (AtlasAgeVertex) graph.materializeVertex(vertexId);
+                    // Build the vertex inline from the row's properties (already selected above) —
+                    // was N+1: a materializeVertex shadow query PER result (1000 hits = 1000 queries).
+                    // Props must be present or Atlas's post-filter drops the row (__typeName/__state
+                    // null -> empty search). [AGE-backend fork — inline materialization]
+                    AgeVertex ageVertex = new AgeVertex(vertexId);
+                    if (propsJson != null) {
+                        ageVertex.setProperties(AgeCypherExecutor.parseAgtypeProperties(propsJson));
+                    }
+                    AtlasAgeVertex atlasVertex = new AtlasAgeVertex(graph, ageVertex);
 
                     results.add(new AgeIndexResult<>(atlasVertex, null, score));
                 }

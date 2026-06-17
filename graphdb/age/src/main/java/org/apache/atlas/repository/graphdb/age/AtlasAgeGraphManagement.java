@@ -122,6 +122,7 @@ public class AtlasAgeGraphManagement implements AtlasGraphManagement {
     @Override
     public void createEdgeIndex(String label, String indexName, AtlasEdgeDirection edgeDirection, List<AtlasPropertyKey> propertyKeys) {
         storeIndexMeta(indexName, "edge", "composite", false, propertyKeys);
+        createPropertyIndex(indexName, propertyKeys, false);
         indexes.put(indexName, new AtlasAgeGraphIndex(indexName, true, false, false, new HashSet<>(propertyKeys)));
     }
 
@@ -195,6 +196,7 @@ public class AtlasAgeGraphManagement implements AtlasGraphManagement {
 
     private void createCompositeIndex(String indexName, boolean isUnique, List<AtlasPropertyKey> propertyKeys, boolean isVertex) {
         storeIndexMeta(indexName, isVertex ? "vertex" : "edge", "composite", isUnique, propertyKeys);
+        createPropertyIndex(indexName, propertyKeys, isVertex);
         indexes.put(indexName, new AtlasAgeGraphIndex(indexName, true, isVertex, isUnique, new HashSet<>(propertyKeys)));
     }
 
@@ -217,6 +219,42 @@ public class AtlasAgeGraphManagement implements AtlasGraphManagement {
         } catch (SQLException e) {
             LOG.warn("Failed to store index metadata for {}", indexName, e);
         }
+    }
+
+    /**
+     * Create a REAL Postgres B-tree index on the shadow table's JSONB-extracted property keys, so
+     * type / qualifiedName predicate filters use an index instead of a sequential scan. Non-unique
+     * (uniqueness is enforced separately via atlas_unique_key) — a pure query-performance index that
+     * completes the previously metadata-only index path. [aegir/signals AGE-backend fork; upstreamable]
+     */
+    private void createPropertyIndex(String indexName, List<AtlasPropertyKey> keys, boolean isVertex) {
+        if (keys == null || keys.isEmpty()) {
+            return;
+        }
+        try {
+            String        table = isVertex ? "atlas_fti_vertex" : "atlas_fti_edge";
+            String        pgName = pgIndexName(indexName);
+            StringBuilder cols   = new StringBuilder();
+            for (AtlasPropertyKey key : keys) {
+                if (cols.length() > 0) {
+                    cols.append(", ");
+                }
+                cols.append("(properties->>'")
+                    .append(AgeCypherExecutor.escapeCypherString(key.getName()))
+                    .append("')");
+            }
+            String sql = "CREATE INDEX IF NOT EXISTS " + pgName + " ON " + table + " USING BTREE (" + cols + ")";
+            graph.getCypherExecutor().executeSqlUpdate(sql);
+            LOG.info("AGE: created Postgres property index {} on {} ({})", pgName, table, cols);
+        } catch (SQLException e) {
+            LOG.warn("AGE: failed to create Postgres property index for {}", indexName, e);
+        }
+    }
+
+    /** A valid, collision-resistant Postgres identifier for an Atlas index name (<=63 chars). */
+    private static String pgIndexName(String indexName) {
+        String s = ("idx_prop_" + indexName).toLowerCase().replaceAll("[^a-z0-9_]", "_");
+        return s.length() > 63 ? s.substring(0, 63) : s;
     }
 
     private void updateTriggerForFields(List<AtlasPropertyKey> propertyKeys) {

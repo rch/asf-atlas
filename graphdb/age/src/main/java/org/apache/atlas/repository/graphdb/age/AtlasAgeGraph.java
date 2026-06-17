@@ -45,6 +45,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -246,22 +247,18 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
     public AtlasVertex<AtlasAgeVertex, AtlasAgeEdge> getVertex(String vertexId) {
         try {
             long id = Long.parseLong(vertexId);
-            String cypher = "MATCH (n:vertex) WHERE id(n) = " + id + " RETURN id(n)";
 
-            try (ResultSet rs = cypherExecutor.executeCypher(cypher)) {
-                if (rs.next()) {
-                    AgeVertex ageVertex = new AgeVertex(id);
-
-                    Map<String, Object> props = loadVertexPropertiesFromShadow(id);
-                    if (props != null) {
-                        ageVertex.setProperties(props);
-                    }
-
-                    return new AtlasAgeVertex(this, ageVertex);
-                }
+            // Resolve existence + properties from the indexed shadow table (PK on vertex_id) —
+            // NOT a Cypher `MATCH (n:vertex) WHERE id(n)=X` check. AGE does not push id()
+            // predicates to the index; it scans the whole vertex label (O(V) per call), which
+            // is THE glossary-traversal bottleneck (getVertex is called per adjacent vertex, so
+            // the cost is O(V) × edges ≈ O(V²)). The shadow row's presence IS the vertex's
+            // existence. [aegir/signals AGE-backend fork — shadow-direct vertex load; upstreamable]
+            Map<String, Object> props = loadVertexPropertiesFromShadow(id);
+            if (props == null) {
+                return null;
             }
-
-            return null;
+            return new AtlasAgeVertex(this, new AgeVertex(id, props));
         } catch (SQLException e) {
             throw new RuntimeException("Failed to get vertex " + vertexId, e);
         }
@@ -321,18 +318,21 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
 
             String cypher = "MATCH (n:vertex) WHERE n." + escapedKey + " = " + cypherValue + " RETURN id(n)";
 
+            List<Long> vertexIds = new ArrayList<>();
             try (ResultSet rs = cypherExecutor.executeCypher(cypher)) {
                 while (rs.next()) {
-                    long vid = AgeCypherExecutor.extractAgtypeId(rs.getString(1));
-                    AgeVertex ageVertex = new AgeVertex(vid);
-
-                    Map<String, Object> props = loadVertexPropertiesFromShadow(vid);
-                    if (props != null) {
-                        ageVertex.setProperties(props);
-                    }
-
-                    result.add(new AtlasAgeVertex(this, ageVertex));
+                    vertexIds.add(AgeCypherExecutor.extractAgtypeId(rs.getString(1)));
                 }
+            }
+            // batch-load matched-vertex properties in one query (was N+1)
+            Map<Long, Map<String, Object>> propsByVid = loadVertexPropertiesBatch(vertexIds);
+            for (Long vid : vertexIds) {
+                AgeVertex ageVertex = new AgeVertex(vid);
+                Map<String, Object> props = propsByVid.get(vid);
+                if (props != null) {
+                    ageVertex.setProperties(props);
+                }
+                result.add(new AtlasAgeVertex(this, ageVertex));
             }
 
             return result;
@@ -504,18 +504,21 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
         try {
             String cypher = "MATCH (n:vertex)-[e]-(m:vertex) WHERE id(n) = " + vertexId + " RETURN DISTINCT id(m)";
 
+            List<Long> vertexIds = new ArrayList<>();
             try (ResultSet rs = cypherExecutor.executeCypher(cypher)) {
                 while (rs.next()) {
-                    long mid = AgeCypherExecutor.extractAgtypeId(rs.getString(1));
-                    AgeVertex ageVertex = new AgeVertex(mid);
-
-                    Map<String, Object> props = loadVertexPropertiesFromShadow(mid);
-                    if (props != null) {
-                        ageVertex.setProperties(props);
-                    }
-
-                    result.add(new AtlasAgeVertex(this, ageVertex));
+                    vertexIds.add(AgeCypherExecutor.extractAgtypeId(rs.getString(1)));
                 }
+            }
+            // batch-load adjacent-vertex properties in one query (was N+1)
+            Map<Long, Map<String, Object>> propsByVid = loadVertexPropertiesBatch(vertexIds);
+            for (Long vid : vertexIds) {
+                AgeVertex ageVertex = new AgeVertex(vid);
+                Map<String, Object> props = propsByVid.get(vid);
+                if (props != null) {
+                    ageVertex.setProperties(props);
+                }
+                result.add(new AtlasAgeVertex(this, ageVertex));
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to get all edge vertices", e);
@@ -570,6 +573,8 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
         String cypher = "MATCH " + matchPattern + " WHERE id(a) = " + vertexId +
                 " RETURN id(e), id(startNode(e)), id(endNode(e)), label(e)";
 
+        List<AgeEdge> drained = new ArrayList<>();
+        List<Long> edgeIds = new ArrayList<>();
         try (ResultSet rs = cypherExecutor.executeCypherWithTypes(cypher,
                 "eid agtype, sid agtype, eid2 agtype, lbl agtype")) {
             while (rs.next()) {
@@ -579,15 +584,19 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
                 String label = rs.getString(4);
                 if (label != null) label = label.replace("\"", "").trim();
 
-                AgeEdge ageEdge = new AgeEdge(eid, sid, tid, label);
-
-                Map<String, Object> props = loadEdgePropertiesFromShadow(eid);
-                if (props != null) {
-                    ageEdge.setProperties(props);
-                }
-
-                result.add(new AtlasAgeEdge(this, ageEdge));
+                drained.add(new AgeEdge(eid, sid, tid, label));
+                edgeIds.add(eid);
             }
+        }
+
+        // batch-load ALL edge properties in one query (was N+1: a shadow query per edge)
+        Map<Long, Map<String, Object>> propsByEid = loadEdgePropertiesBatch(edgeIds);
+        for (AgeEdge ageEdge : drained) {
+            Map<String, Object> props = propsByEid.get(ageEdge.getId());
+            if (props != null) {
+                ageEdge.setProperties(props);
+            }
+            result.add(new AtlasAgeEdge(this, ageEdge));
         }
 
         return result;
@@ -652,5 +661,56 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
         }
 
         return null;
+    }
+
+    /**
+     * Load the shadow-table properties for MANY vertices in a SINGLE query (id -> props).
+     * Replaces the N+1 pattern of calling loadVertexPropertiesFromShadow per vertex inside a
+     * traversal/scan loop — the dominant cause of multi-second bulk hangs on the AGE backend.
+     * [aegir/signals AGE-backend fork — batched materialization; upstreamable]
+     */
+    private Map<Long, Map<String, Object>> loadVertexPropertiesBatch(List<Long> vertexIds) throws SQLException {
+        Map<Long, Map<String, Object>> out = new HashMap<>();
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return out;
+        }
+        StringBuilder ids = new StringBuilder();
+        for (int i = 0; i < vertexIds.size(); i++) {
+            if (i > 0) ids.append(",");
+            ids.append(vertexIds.get(i));
+        }
+        String sql = "SELECT vertex_id, properties FROM atlas_fti_vertex WHERE vertex_id = ANY(ARRAY[" + ids + "]::bigint[])";
+        try (ResultSet rs = cypherExecutor.executeSql(sql)) {
+            while (rs.next()) {
+                String jsonb = rs.getString(2);
+                if (jsonb != null) {
+                    out.put(rs.getLong(1), AgeCypherExecutor.parseAgtypeProperties(jsonb));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Edge twin of {@link #loadVertexPropertiesBatch} — one query for many edges' properties. */
+    private Map<Long, Map<String, Object>> loadEdgePropertiesBatch(List<Long> edgeIds) throws SQLException {
+        Map<Long, Map<String, Object>> out = new HashMap<>();
+        if (edgeIds == null || edgeIds.isEmpty()) {
+            return out;
+        }
+        StringBuilder ids = new StringBuilder();
+        for (int i = 0; i < edgeIds.size(); i++) {
+            if (i > 0) ids.append(",");
+            ids.append(edgeIds.get(i));
+        }
+        String sql = "SELECT edge_id, properties FROM atlas_fti_edge WHERE edge_id = ANY(ARRAY[" + ids + "]::bigint[])";
+        try (ResultSet rs = cypherExecutor.executeSql(sql)) {
+            while (rs.next()) {
+                String jsonb = rs.getString(2);
+                if (jsonb != null) {
+                    out.put(rs.getLong(1), AgeCypherExecutor.parseAgtypeProperties(jsonb));
+                }
+            }
+        }
+        return out;
     }
 }
