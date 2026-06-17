@@ -44,6 +44,7 @@ public class AgeSchemaManager {
                 initializeGraph(stmt);
                 initializeShadowTables(stmt);
                 initializeIndexes(stmt);
+                initializeAgeIdIndex(stmt);
                 initializeTriggers(stmt);
                 initializeMetaTables(stmt);
             }
@@ -177,6 +178,45 @@ public class AgeSchemaManager {
             "    is_unique    boolean DEFAULT false," +
             "    field_keys   jsonb DEFAULT '[]'" +
             ")");
+    }
+
+    /**
+     * Create a functional index matching the SQL AGE generates for `MATCH (n:vertex) WHERE id(n)=X`:
+     *   age_id(_agtype_build_vertex(id, _label_name(&lt;graph_ns_oid&gt;, id), properties)) = X::agtype
+     * Without it AGE seq-scans the whole vertex label (it does NOT push id() to the PK) — O(V) per
+     * lookup, the bulk-traversal/delete wall (glossary hangs, slow --reset). With it: Bitmap Index
+     * Scan (~215x: 17ms → 0.08ms). All Atlas vertices use the single `vertex` label, so this one
+     * index covers getVertex / edge-traversal id(a)=X / deleteVertex id(n)=X. AGE creates the
+     * `vertex` label table lazily on first vertex, so on a brand-new graph this is a no-op until the
+     * table exists (created on a later start). Best-effort: never breaks schema init.
+     * [aegir/signals AGE-backend fork — the global id()-lookup fix; upstreamable]
+     */
+    private void initializeAgeIdIndex(Statement stmt) {
+        try {
+            long nsOid;
+            try (java.sql.ResultSet rs = stmt.executeQuery(
+                    "SELECT '" + graphName + "'::regnamespace::oid::bigint")) {
+                if (!rs.next()) {
+                    return;
+                }
+                nsOid = rs.getLong(1);
+            }
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_vertex_ageid ON " + graphName + ".\"vertex\" " +
+                    "(ag_catalog.age_id(ag_catalog._agtype_build_vertex(id, " +
+                    "ag_catalog._label_name(" + nsOid + "::oid, id), properties)))");
+            // Property lookups (`MATCH (n:vertex) WHERE n.qualifiedName=X` / `n.__guid=X`) seq-scan
+            // the same way (filter agtype_access_operator(ARRAY[properties,'"key"']) = X); these run on
+            // every entity create (relationship resolution / unique check), so index the two hot keys.
+            // Plain (not CONCURRENTLY): runs at schema-init before traffic, so no write lock to dodge.
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_vertex_guid ON " + graphName + ".\"vertex\" " +
+                    "(ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"__guid\"'::ag_catalog.agtype]))");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_vertex_qn ON " + graphName + ".\"vertex\" " +
+                    "(ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"qualifiedName\"'::ag_catalog.agtype]))");
+            LOG.info("AGE: vertex functional indexes ensured on '{}'.vertex (id() + __guid + qualifiedName)", graphName);
+        } catch (SQLException e) {
+            // vertex label table not created yet (fresh graph) or transient — safe to skip; retried next start
+            LOG.info("AGE: vertex functional indexes deferred for '{}': {}", graphName, e.getMessage());
+        }
     }
 
     private void executeIgnoreExisting(Statement stmt, String sql) throws SQLException {
