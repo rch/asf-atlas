@@ -381,12 +381,19 @@ public class AtlasAgeGraph implements AtlasGraph<AtlasAgeVertex, AtlasAgeEdge> {
 
     @Override
     public void commit() {
-        txManager.commit();
+        // commitAndRelease (not bare commit): return the connection to the Hikari pool at the
+        // transaction boundary. GraphTransactionInterceptor calls this once per OUTER @GraphTransaction
+        // (≈ per request); bare commit() left the connection checked out in the jetty worker's
+        // ThreadLocal forever (committed → Postgres "idle", but never returned to Hikari). With ~200
+        // jetty threads vs a 50-connection pool, ~50 distinct request threads drained the pool over
+        // hours → getConnection() blocked → /admin/metrics (then all DB ops) hung.
+        // [aegir/signals AGE-backend fork; upstreamable]
+        txManager.commitAndRelease();
     }
 
     @Override
     public void rollback() {
-        txManager.rollback();
+        txManager.rollbackAndRelease();
     }
 
     @Override
