@@ -62,11 +62,19 @@
         <url-pattern>/api/atlas/*</url-pattern>
     </servlet-mapping>
 
-    <!-- OpenLineage + Marquez-compat surface (same Jersey SpringServlet).
-         Resources in org.apache.atlas.web.rest.openlineage use @Path relative
-         to this mapping (e.g. /api/v1/lineage). Does not alter /api/atlas/*. -->
+    <!-- OpenLineage + Marquez-compat surface (plain HttpServlet, not Jersey).
+         Atlas LineageResource is @Path("lineage"); SpringServlet registers every
+         @Path bean on every mapping, so a shared jersey mapping for /api/v1/*
+         made POST/GET /api/v1/lineage hit Atlas lineage (TerminatingRule 500).
+         OpenLineageServlet owns /api/v1/* exclusively. -->
+    <servlet>
+        <servlet-name>openlineage-servlet</servlet-name>
+        <servlet-class>org.apache.atlas.web.rest.openlineage.OpenLineageServlet</servlet-class>
+        <load-on-startup>2</load-on-startup>
+    </servlet>
+
     <servlet-mapping>
-        <servlet-name>jersey-servlet</servlet-name>
+        <servlet-name>openlineage-servlet</servlet-name>
         <url-pattern>/api/v1/*</url-pattern>
     </servlet-mapping>
 

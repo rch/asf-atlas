@@ -44,15 +44,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenLineage HTTP ingest + Marquez-compatible read API.
- * Served at {@code /api/v1/*} when jersey-servlet is mapped there (see web.xml).
- * Does not alter {@code /api/atlas/v2/*} governance clients.
+ * OpenLineage HTTP contract helpers (formerly Jersey resource).
+ * <p>
+ * Live HTTP is {@link OpenLineageServlet} on {@code /api/v1/*} — Jersey was
+ * abandoned for this surface because Atlas {@code LineageResource}
+ * ({@code @Path("lineage")}) collides under a shared SpringServlet.
+ * This class is retained as a thin Spring bean for unit tests / future
+ * re-binding; it is not a Jersey root resource (no {@code @Path}).
  */
-@Path("")
-@Singleton
 @Service
-@Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
-@Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
+@Singleton
 public class OpenLineageREST {
     private static final Logger LOG = LoggerFactory.getLogger(OpenLineageREST.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -62,6 +63,12 @@ public class OpenLineageREST {
     @Inject
     public OpenLineageREST(OpenLineageStore store) {
         this.store = store;
+    }
+
+    /** JAX-RS 1.x has no WebApplicationException(String, Status). */
+    private static WebApplicationException httpError(String message, Response.Status status) {
+        return new WebApplicationException(
+            Response.status(status).entity(message == null ? status.getReasonPhrase() : message).type(MediaType.TEXT_PLAIN).build());
     }
 
     @GET
@@ -80,17 +87,17 @@ public class OpenLineageREST {
         try {
             JsonNode node = MAPPER.readTree(body);
             if (!node.isObject()) {
-                throw new WebApplicationException("body must be a RunEvent object", Response.Status.BAD_REQUEST);
+                throw httpError("body must be a RunEvent object", Response.Status.BAD_REQUEST);
             }
             Map<String, Object> receipt = store.ingestRunEvent(node);
             return Response.status(Response.Status.CREATED).entity(receipt).build();
         } catch (IllegalArgumentException e) {
-            throw new WebApplicationException(e.getMessage(), Response.Status.BAD_REQUEST);
+            throw httpError(e.getMessage(), Response.Status.BAD_REQUEST);
         } catch (WebApplicationException e) {
             throw e;
         } catch (Exception e) {
             LOG.error("OpenLineage ingest failed", e);
-            throw new WebApplicationException("ingest failed: " + e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError("ingest failed: " + e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -111,7 +118,7 @@ public class OpenLineageREST {
             return resp;
         } catch (Exception e) {
             LOG.error("list namespaces failed", e);
-            throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -126,7 +133,7 @@ public class OpenLineageREST {
             return resp;
         } catch (Exception e) {
             LOG.error("list jobs failed", e);
-            throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -141,7 +148,7 @@ public class OpenLineageREST {
             return resp;
         } catch (Exception e) {
             LOG.error("list runs failed", e);
-            throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -156,7 +163,7 @@ public class OpenLineageREST {
             return resp;
         } catch (Exception e) {
             LOG.error("list datasets failed", e);
-            throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -167,15 +174,15 @@ public class OpenLineageREST {
             @QueryParam("nodeId") String nodeId,
             @QueryParam("depth") @DefaultValue("2") int depth) {
         if (nodeId == null || nodeId.isEmpty()) {
-            throw new WebApplicationException("nodeId is required", Response.Status.BAD_REQUEST);
+            throw httpError("nodeId is required", Response.Status.BAD_REQUEST);
         }
         try {
             return store.lineageGraph(nodeId, depth);
         } catch (IllegalArgumentException e) {
-            throw new WebApplicationException(e.getMessage(), Response.Status.BAD_REQUEST);
+            throw httpError(e.getMessage(), Response.Status.BAD_REQUEST);
         } catch (Exception e) {
             LOG.error("lineage graph failed", e);
-            throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+            throw httpError(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
 }
