@@ -182,7 +182,10 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
                 "/libs/**", "/n/libs/**",
                 "/js/**", "/n/js/**",
                 "/ieerror.html", "/migration-status.html",
-                "/api/atlas/admin/status"));
+                "/api/atlas/admin/status",
+                // OpenLineage producers (Flink) + marquez-web proxy: no Atlas session cookie.
+                // Lab: permit /api/v1/**. Production: put Cloudflare Access / IdP in front.
+                "/api/v1/**"));
 
         if (!keycloakEnabled) {
             matchers.add("/login.jsp");

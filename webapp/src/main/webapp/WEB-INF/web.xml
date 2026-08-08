@@ -62,6 +62,14 @@
         <url-pattern>/api/atlas/*</url-pattern>
     </servlet-mapping>
 
+    <!-- OpenLineage + Marquez-compat surface (same Jersey SpringServlet).
+         Resources in org.apache.atlas.web.rest.openlineage use @Path relative
+         to this mapping (e.g. /api/v1/lineage). Does not alter /api/atlas/*. -->
+    <servlet-mapping>
+        <servlet-name>jersey-servlet</servlet-name>
+        <url-pattern>/api/v1/*</url-pattern>
+    </servlet-mapping>
+
     <filter>
         <filter-name>springSecurityFilterChain</filter-name>
         <filter-class>org.springframework.web.filter.DelegatingFilterProxy</filter-class>
