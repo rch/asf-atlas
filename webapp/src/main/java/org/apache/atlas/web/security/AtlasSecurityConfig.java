@@ -184,8 +184,9 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
                 "/ieerror.html", "/migration-status.html",
                 "/api/atlas/admin/status",
                 // OpenLineage producers (Flink) + marquez-web proxy: no Atlas session cookie.
-                // Lab: permit /api/v1/**. Production: put Cloudflare Access / IdP in front.
-                "/api/v1/**"));
+                // Lab: permit full Marquez-compat surface. Production: Cloudflare Access / IdP in front.
+                "/api/v1/**",
+                "/api/v2beta/**"));
 
         if (!keycloakEnabled) {
             matchers.add("/login.jsp");
