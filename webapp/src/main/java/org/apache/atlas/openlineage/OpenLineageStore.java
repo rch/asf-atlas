@@ -182,6 +182,19 @@ public class OpenLineageStore {
                 ")"
             );
             s.execute(
+                "CREATE TABLE IF NOT EXISTS public.lineage_dataset_sources (" +
+                " namespace TEXT NOT NULL," +
+                " name TEXT NOT NULL," +
+                " source_name TEXT NOT NULL," +
+                " PRIMARY KEY (namespace, name)" +
+                ")"
+            );
+            // Stock Marquez ships a "default" source; datasets without a
+            // dataSource facet land on it.
+            s.execute(
+                "INSERT INTO public.lineage_sources (name) VALUES ('default') ON CONFLICT DO NOTHING"
+            );
+            s.execute(
                 "CREATE INDEX IF NOT EXISTS lineage_events_time_idx ON public.lineage_events (event_time DESC)"
             );
             s.execute(
@@ -349,6 +362,10 @@ public class OpenLineageStore {
                 ps.setString(11, MAPPER.writeValueAsString(body));
                 ps.executeUpdate();
             }
+
+            // Materialize Marquez Sources from dataset dataSource facets
+            // (else "default"), and remember each dataset's source.
+            materializeSources(c, body);
 
             Map<String, String> jobKeys = mapOf("namespace", ns, "name", name);
             Map<String, String> jobProps = mapOf(
@@ -1071,7 +1088,7 @@ public class OpenLineageStore {
         d.put("createdAt", now);
         d.put("updatedAt", now);
         d.put("namespace", namespace);
-        d.put("sourceName", "default");
+        d.put("sourceName", datasetSourceName(c, namespace, name));
         d.put("fields", Collections.emptyList());
         d.put("tags", entityTags(c, "dataset", namespace, name, ""));
         d.put("lastModifiedAt", now);
@@ -1586,7 +1603,7 @@ public class OpenLineageStore {
             }
             String did = datasetId(qn);
             String[] p = qn.split(":", 2);
-            node(graph, did, "DATASET", datasetData(p[0], p.length > 1 ? p[1] : qn));
+            node(graph, did, "DATASET", datasetData(c, p[0], p.length > 1 ? p[1] : qn));
             edge(graph, did, jid);
             if (depth > 1) {
                 expandDataset(c, graph, qn, depth - 1);
@@ -1599,7 +1616,7 @@ public class OpenLineageStore {
             }
             String did = datasetId(qn);
             String[] p = qn.split(":", 2);
-            node(graph, did, "DATASET", datasetData(p[0], p.length > 1 ? p[1] : qn));
+            node(graph, did, "DATASET", datasetData(c, p[0], p.length > 1 ? p[1] : qn));
             edge(graph, jid, did);
             if (depth > 1) {
                 expandDataset(c, graph, qn, depth - 1);
@@ -1611,7 +1628,7 @@ public class OpenLineageStore {
                                String qn, int depth) throws Exception {
         String did = datasetId(qn);
         String[] p = qn.split(":", 2);
-        node(graph, did, "DATASET", datasetData(p[0], p.length > 1 ? p[1] : qn));
+        node(graph, did, "DATASET", datasetData(c, p[0], p.length > 1 ? p[1] : qn));
         List<String> producers = cypher(c,
             "MATCH (j:Job)-[:EXECUTES]->(:Run)-[:OUTPUTS]->(:Dataset {qualifiedName: " + lit(qn) +
             "}) RETURN {ns: j.namespace, n: j.name}");
@@ -1701,7 +1718,7 @@ public class OpenLineageStore {
         return d;
     }
 
-    private static Map<String, Object> datasetData(String ns, String name) {
+    private static Map<String, Object> datasetData(Connection c, String ns, String name) {
         // Full LineageDataset-shaped payload for Marquez table-level graph nodes
         String now = Instant.now().toString();
         Map<String, Object> d = new LinkedHashMap<>();
@@ -1715,7 +1732,7 @@ public class OpenLineageStore {
         d.put("createdAt", now);
         d.put("updatedAt", now);
         d.put("namespace", ns);
-        d.put("sourceName", "default");
+        d.put("sourceName", datasetSourceName(c, ns, name));
         d.put("fields", Collections.emptyList());
         d.put("facets", Collections.emptyMap());
         d.put("tags", Collections.emptyList());
@@ -1725,6 +1742,64 @@ public class OpenLineageStore {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private void materializeSources(Connection c, JsonNode body) throws Exception {
+        for (String side : new String[] {"inputs", "outputs"}) {
+            JsonNode arr = body.path(side);
+            if (arr == null || !arr.isArray()) {
+                continue;
+            }
+            for (JsonNode d : arr) {
+                String ns = text(d, "namespace");
+                String name = text(d, "name");
+                if (ns.isEmpty() || name.isEmpty()) {
+                    continue;
+                }
+                JsonNode src = d.path("facets").path("dataSource");
+                String sourceName = text(src, "name");
+                if (sourceName.isEmpty()) {
+                    sourceName = "default";
+                }
+                String uri = text(src, "uri");
+                try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO public.lineage_sources (name, connection_url) VALUES (?, ?) " +
+                    "ON CONFLICT (name) DO UPDATE SET " +
+                    " connection_url = COALESCE(NULLIF(EXCLUDED.connection_url, ''), public.lineage_sources.connection_url)," +
+                    " updated_at = NOW()"
+                )) {
+                    ps.setString(1, sourceName);
+                    ps.setString(2, uri.isEmpty() ? null : uri);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = c.prepareStatement(
+                    "INSERT INTO public.lineage_dataset_sources (namespace, name, source_name) VALUES (?, ?, ?) " +
+                    "ON CONFLICT (namespace, name) DO UPDATE SET source_name = EXCLUDED.source_name"
+                )) {
+                    ps.setString(1, ns);
+                    ps.setString(2, name);
+                    ps.setString(3, sourceName);
+                    ps.executeUpdate();
+                }
+            }
+        }
+    }
+
+    private static String datasetSourceName(Connection c, String namespace, String name) {
+        try (PreparedStatement ps = c.prepareStatement(
+            "SELECT source_name FROM public.lineage_dataset_sources WHERE namespace = ? AND name = ?"
+        )) {
+            ps.setString(1, namespace);
+            ps.setString(2, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString(1);
+                }
+            }
+        } catch (Exception ignore) {
+            // fall through — "default" is the honest floor
+        }
+        return "default";
+    }
 
     private static List<String> datasetQns(JsonNode arr) {
         List<String> out = new ArrayList<>();
